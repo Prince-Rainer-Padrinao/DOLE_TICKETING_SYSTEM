@@ -1,10 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Building2, Users, FileText, CheckCircle, XCircle, 
   Clock, ShieldAlert, PlusCircle, MessageSquare, Calendar,
   LayoutDashboard, List, FileSignature, Shield, ChevronDown, ChevronRight,
-  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2
+  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2, ClipboardList, Edit, CheckSquare
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -154,11 +153,13 @@ export default function App() {
   
   const [isListingsOpen, setIsListingsOpen] = useState(false);
   const [serviceFilter, setServiceFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All'); 
 
-  const [timeframe, setTimeframe] = useState('daily'); // Add this new line!
+  const [timeframe, setTimeframe] = useState('daily');
 
   const [rfaStep, setRfaStep] = useState(-1);
   const [rfaFormData, setRfaFormData] = useState(INITIAL_RFA_DATA);
+  const [editingUser, setEditingUser] = useState(null);
 
   // Load App Data from Supabase and Handle Google Redirects
   useEffect(() => {
@@ -181,28 +182,42 @@ export default function App() {
 
     fetchDatabase();
 
-    // Google Auth Listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
-        
-        // MAGIC LINE: Wipe the giant Google token from the address bar so it doesn't cause a reload loop!
-        window.history.replaceState({}, document.title, window.location.pathname);
-        
-        const userEmail = session.user.email.toLowerCase();
-        
-        const { data: dbUser } = await supabase.from('dole_users').select('*').eq('email', userEmail).maybeSingle();
-        
-        if (dbUser && (dbUser.role === 'admin' || dbUser.role === 'employee')) {
-          setCurrentUser(dbUser);
-          setView('dashboard');
-        } else {
-          await supabase.auth.signOut();
-          localStorage.clear();
-          setCurrentUser(null);
-          // Redirect instead of alert-locking
-          window.location.href = window.location.origin;
-          alert("Access Denied: This Google account is not registered as a System User.");
-        }
+    const initAuth = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error || (session && session.expires_at && session.expires_at < Math.floor(Date.now() / 1000))) {
+        await supabase.auth.signOut();
+        localStorage.clear();
+        setCurrentUser(null);
+      } else if (session) {
+        await handleAuthSession(session);
+      }
+    };
+
+    const handleAuthSession = async (session) => {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      const userEmail = session.user.email.toLowerCase();
+      const { data: dbUser } = await supabase.from('dole_users').select('*').eq('email', userEmail).maybeSingle();
+      
+      if (dbUser && (dbUser.role === 'admin' || dbUser.role === 'employee')) {
+        setCurrentUser(dbUser);
+        setView('dashboard');
+      } else {
+        await supabase.auth.signOut();
+        localStorage.clear();
+        setCurrentUser(null);
+        window.location.href = window.location.origin;
+        alert("Access Denied: This Google account is not registered as a System User.");
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) handleAuthSession(session);
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setView('dashboard');
       }
     });
 
@@ -223,6 +238,9 @@ export default function App() {
 
   // --- MANUAL AUTHENTICATION LOGIC ---
   const handleLogin = async (identifier, password, provider) => {
+    await supabase.auth.signOut();
+    localStorage.clear();
+
     const lowerIdentifier = identifier.toLowerCase();
     
     const user = registeredUsers.find(
@@ -268,11 +286,8 @@ export default function App() {
     } catch (e) {
       console.error("Supabase logout error:", e);
     } finally {
-      // Nuclear Option
       localStorage.clear(); 
       setCurrentUser(null);
-      
-      // Force the browser back to the absolute base URL, dropping any leftover hash tokens
       window.location.href = window.location.origin; 
     }
   };
@@ -318,6 +333,27 @@ export default function App() {
     }
   };
 
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const updatedUser = {
+      email: formData.get('email').toLowerCase().trim(),
+      password: formData.get('password'),
+      role: formData.get('role'),
+      name: formData.get('name')
+    };
+
+    const { error } = await supabase.from('dole_users').update(updatedUser).eq('id', editingUser.id);
+    
+    if (error) {
+      alert("Error updating account: " + error.message);
+    } else {
+      setRegisteredUsers(registeredUsers.map(u => u.id === editingUser.id ? { ...u, ...updatedUser } : u));
+      setEditingUser(null);
+      alert("Account successfully updated!");
+    }
+  };
+  
   // --- STANDARD TICKETING LOGIC ---
   const handleClientSubmit = async (e) => {
     e.preventDefault();
@@ -727,25 +763,22 @@ export default function App() {
   };
 
   const renderDashboardStats = () => {
-    // 1. Calculate timeframes
     const now = new Date();
     let startTime = 0;
 
     if (timeframe === 'daily') {
-      startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(); // Start of today
+      startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(); 
     } else if (timeframe === 'weekly') {
       const firstDay = now.getDate() - now.getDay();
-      startTime = new Date(now.getFullYear(), now.getMonth(), firstDay).getTime(); // Start of this week
+      startTime = new Date(now.getFullYear(), now.getMonth(), firstDay).getTime(); 
     } else if (timeframe === 'monthly') {
-      startTime = new Date(now.getFullYear(), now.getMonth(), 1).getTime(); // Start of this month
+      startTime = new Date(now.getFullYear(), now.getMonth(), 1).getTime(); 
     }
 
-    // 2. Count resolved tickets per service
     const resolvedCounts = {};
-    DOLE_SERVICES.forEach(s => resolvedCounts[s] = 0); // Initialize all to 0
+    DOLE_SERVICES.forEach(s => resolvedCounts[s] = 0); 
 
     tickets.forEach(ticket => {
-      // Find when it was resolved (uses latest action time, or creation time if no actions)
       const actionTime = ticket.updates && ticket.updates.length > 0 
         ? ticket.updates[ticket.updates.length - 1].updated_at 
         : ticket.created_at;
@@ -757,7 +790,6 @@ export default function App() {
       }
     });
 
-    // Muted, professional color palette
     const palette = [
       'bg-slate-100 text-slate-800 border-slate-200', 'bg-stone-100 text-stone-800 border-stone-200', 
       'bg-zinc-100 text-zinc-800 border-zinc-200', 'bg-blue-50 text-blue-900 border-blue-200', 
@@ -784,7 +816,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* The Colored Squares Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {DOLE_SERVICES.map((service, index) => {
             const count = resolvedCounts[service];
@@ -802,7 +833,6 @@ export default function App() {
   };
 
   const renderValidationTable = () => {
-    // 1. Admin Security Lock
     if (currentUser.role !== 'admin') {
       return (
         <div className="max-w-2xl mx-auto mt-16 animate-in fade-in slide-in-from-bottom-4">
@@ -825,25 +855,49 @@ export default function App() {
       );
     }
 
-    // 2. Load Table (Only Admins make it past the lock)
-    let displayTickets = tickets; 
-
+    const validationStatuses = ['Open', 'Rejected'];
+    let displayTickets = tickets.filter(t => validationStatuses.includes(t.status));
     if (serviceFilter !== 'All') {
       displayTickets = displayTickets.filter(t => t.service_type === serviceFilter);
+    }
+    if (statusFilter !== 'All') {
+      displayTickets = displayTickets.filter(t => t.status === statusFilter);
     }
 
     return (
       <div className="max-w-[95%] mx-auto mt-6">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">
-            {serviceFilter === 'All' ? 'Pending Validations' : `${serviceFilter} Tickets`}
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 shrink-0">
+            Pending Validations
           </h2>
-          <button 
-            onClick={() => setView('form')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-sm"
-          >
-            <PlusCircle size={18} /> New Inquiry
-          </button>
+          
+          <div className="flex gap-3 w-full md:w-auto">
+            <select 
+              value={statusFilter} 
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Open">Open</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+
+            <select 
+              value={serviceFilter} 
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Services</option>
+              {DOLE_SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+
+            <button 
+              onClick={() => setView('form')}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-sm shrink-0"
+            >
+              <PlusCircle size={18} /> New Inquiry
+            </button>
+          </div>
         </div>
 
         <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
@@ -852,6 +906,7 @@ export default function App() {
               <thead>
                 <tr className="bg-slate-50 text-slate-600 border-b text-sm">
                   <th className="p-3 font-medium">Ref No.</th>
+                  <th className="p-3 font-medium">Client Name</th>
                   <th className="p-3 font-medium">Subject</th>
                   <th className="p-3 font-medium">Service</th>
                   <th className="p-3 font-medium">Status</th>
@@ -865,11 +920,12 @@ export default function App() {
               </thead>
               <tbody>
                 {displayTickets.length === 0 ? (
-                  <tr><td colSpan="10" className="p-8 text-center text-gray-500">No tickets found for this category.</td></tr>
+                  <tr><td colSpan="11" className="p-8 text-center text-gray-500">No tickets match your filters.</td></tr>
                 ) : (
                   displayTickets.map(ticket => (
                     <tr key={ticket.id} className="border-b hover:bg-slate-50 transition-colors text-sm">
                       <td className="p-3 font-medium text-gray-800">{ticket.reference_no || 'N/A'}</td>
+                      <td className="p-3 font-medium text-gray-800">{ticket.client_name}</td>
                       <td className="p-3 font-medium text-blue-900 truncate max-w-[150px]" title={ticket.subject}>{ticket.subject}</td>
                       <td className="p-3"><span className="bg-blue-100 text-blue-800 border border-blue-200 px-2 py-1 rounded text-xs">{ticket.service_type}</span></td>
                       <td className="p-3">
@@ -906,6 +962,208 @@ export default function App() {
                             Validate
                           </button>
                         </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderValidatedTasks = () => {
+    const validStatuses = ['Ongoing', 'Pending', 'Resolved', 'Accepted - Pending Assignment'];
+    let displayTickets = tickets.filter(t => validStatuses.includes(t.status));
+
+    if (serviceFilter !== 'All') {
+      displayTickets = displayTickets.filter(t => t.service_type === serviceFilter);
+    }
+    if (statusFilter !== 'All') {
+      displayTickets = displayTickets.filter(t => t.status === statusFilter);
+    }
+
+    return (
+      <div className="max-w-[95%] mx-auto mt-6">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 shrink-0">
+            Validated Tasks
+          </h2>
+          
+          <div className="flex gap-3 w-full md:w-auto">
+            <select 
+              value={statusFilter} 
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Validated</option>
+              <option value="Accepted - Pending Assignment">Pending Assignment</option>
+              <option value="Ongoing">Ongoing</option>
+              <option value="Pending">Pending</option>
+              <option value="Resolved">Resolved</option>
+            </select>
+
+            <select 
+              value={serviceFilter} 
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Services</option>
+              {DOLE_SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600 border-b text-sm">
+                  <th className="p-3 font-medium">Ref No.</th>
+                  <th className="p-3 font-medium">Client Name</th>
+                  <th className="p-3 font-medium">Subject</th>
+                  <th className="p-3 font-medium">Service</th>
+                  <th className="p-3 font-medium">Status</th>
+                  <th className="p-3 font-medium">Assigned To</th>
+                  <th className="p-3 font-medium">Date Assigned</th>
+                  <th className="p-3 font-medium text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayTickets.length === 0 ? (
+                  <tr><td colSpan="8" className="p-8 text-center text-gray-500">No validated tasks found.</td></tr>
+                ) : (
+                  displayTickets.map(ticket => (
+                    <tr key={ticket.id} className="border-b hover:bg-slate-50 transition-colors text-sm">
+                      <td className="p-3 font-medium text-gray-800">{ticket.reference_no || 'N/A'}</td>
+                      <td className="p-3 font-medium text-gray-800">{ticket.client_name}</td>
+                      <td className="p-3 font-medium text-blue-900 truncate max-w-[200px]" title={ticket.subject}>{ticket.subject}</td>
+                      <td className="p-3"><span className="bg-blue-100 text-blue-800 border border-blue-200 px-2 py-1 rounded text-xs">{ticket.service_type}</span></td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(ticket.status)}`}>
+                          {ticket.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        {ticket.assigned_to ? registeredUsers.find(u => u.id === ticket.assigned_to)?.name : 'Unassigned'}
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        {ticket.date_assigned ? new Date(ticket.date_assigned).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="p-3 text-center">
+                        {currentUser.role === 'admin' ? (
+                          <div className="flex justify-center gap-1.5 items-center">
+                            <button 
+                              onClick={() => { setSelectedTicket(ticket); setStatusUpdateChoice(ticket.status === 'Open' ? 'Ongoing' : ticket.status); setView('ticket_detail'); }}
+                              className="relative bg-[#ffc107] text-black px-3 py-1 rounded-full text-xs font-medium hover:bg-yellow-500 transition-colors shadow-sm"
+                            >
+                              {ticket.updates && ticket.updates.length > 0 && (
+                                <span className="absolute -top-1.5 -left-1.5 bg-[#dc3545] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm leading-none flex items-center justify-center min-w-[16px] h-[16px]">
+                                  {ticket.updates.length}
+                                </span>
+                              )}
+                              Edit / Notes
+                            </button>
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={() => { setSelectedTicket(ticket); setView('ticket_detail'); }}
+                            className="bg-slate-200 text-slate-800 px-4 py-1 rounded-full text-xs font-medium hover:bg-slate-300 transition-colors shadow-sm"
+                          >
+                            View Details
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEmployeeTasks = () => {
+    let displayTickets = tickets.filter(t => t.assigned_to === currentUser.id);
+
+    if (serviceFilter !== 'All') {
+      displayTickets = displayTickets.filter(t => t.service_type === serviceFilter);
+    }
+    if (statusFilter !== 'All') {
+      displayTickets = displayTickets.filter(t => t.status === statusFilter);
+    }
+
+    return (
+      <div className="max-w-[95%] mx-auto mt-6">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 shrink-0">
+            My Assigned Tasks
+          </h2>
+          <div className="flex gap-3 w-full md:w-auto">
+            <select 
+              value={statusFilter} 
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Ongoing">Ongoing</option>
+              <option value="Pending">Pending</option>
+              <option value="Resolved">Resolved</option>
+            </select>
+            <select 
+              value={serviceFilter} 
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Services</option>
+              {DOLE_SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600 border-b text-sm">
+                  <th className="p-3 font-medium">Ref No.</th>
+                  <th className="p-3 font-medium">Client Name</th>
+                  <th className="p-3 font-medium">Subject</th>
+                  <th className="p-3 font-medium">Service</th>
+                  <th className="p-3 font-medium">Status</th>
+                  <th className="p-3 font-medium">Date Assigned</th>
+                  <th className="p-3 font-medium text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayTickets.length === 0 ? (
+                  <tr><td colSpan="7" className="p-8 text-center text-gray-500">No tasks assigned to you currently.</td></tr>
+                ) : (
+                  displayTickets.map(ticket => (
+                    <tr key={ticket.id} className="border-b hover:bg-slate-50 transition-colors text-sm">
+                      <td className="p-3 font-medium text-gray-800">{ticket.reference_no || 'N/A'}</td>
+                      <td className="p-3 font-medium text-gray-800">{ticket.client_name}</td>
+                      <td className="p-3 font-medium text-blue-900 truncate max-w-[200px]" title={ticket.subject}>{ticket.subject}</td>
+                      <td className="p-3"><span className="bg-blue-100 text-blue-800 border border-blue-200 px-2 py-1 rounded text-xs">{ticket.service_type}</span></td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(ticket.status)}`}>
+                          {ticket.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        {ticket.date_assigned ? new Date(ticket.date_assigned).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button 
+                          onClick={() => { setSelectedTicket(ticket); setStatusUpdateChoice(ticket.status === 'Open' ? 'Ongoing' : ticket.status); setView('ticket_detail'); }}
+                          className="bg-[#198754] text-white px-4 py-1 rounded-full text-xs font-medium hover:bg-[#157347] transition-colors shadow-sm"
+                        >
+                          View / Update
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -1163,7 +1421,14 @@ export default function App() {
                       </span>
                     </td>
                     <td className="p-5 text-slate-500 text-sm">{user.password}</td>
-                    <td className="p-5 text-center">
+                    <td className="p-5 text-center flex justify-center gap-2">
+                      <button 
+                        onClick={() => setEditingUser(user)} 
+                        className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors" 
+                        title="Edit Details"
+                      >
+                        <Edit size={18} />
+                      </button>
                       <button 
                         onClick={() => handleDeleteUser(user.id, user.email)} 
                         className="p-2 text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors" 
@@ -1177,6 +1442,43 @@ export default function App() {
               </tbody>
             </table>
           </div>
+
+          {/* EDIT USER MODAL */}
+          {editingUser && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
+                <div className="border-b px-6 py-4 flex justify-between items-center bg-slate-50">
+                  <h3 className="font-bold text-lg text-slate-800">Edit User Account</h3>
+                  <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                </div>
+                <form onSubmit={handleUpdateUser} className="p-6 space-y-4">
+                  <div>
+                    <label className="text-sm font-bold text-slate-600">Email or Username</label>
+                    <input name="email" type="text" required defaultValue={editingUser.email} className="w-full px-4 py-2 mt-1 bg-white border border-slate-200 rounded-xl" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-slate-600">Full Name</label>
+                    <input name="name" type="text" required defaultValue={editingUser.name} className="w-full px-4 py-2 mt-1 bg-white border border-slate-200 rounded-xl" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-slate-600">Role</label>
+                    <select name="role" required defaultValue={editingUser.role} className="w-full px-4 py-2 mt-1 bg-white border border-slate-200 rounded-xl">
+                      <option value="employee">Employee</option>
+                      <option value="admin">Administrator</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-slate-600">Password</label>
+                    <input name="password" type="text" required defaultValue={editingUser.password} className="w-full px-4 py-2 mt-1 bg-white border border-slate-200 rounded-xl" />
+                  </div>
+                  <div className="pt-4 flex justify-end gap-3">
+                    <button type="button" onClick={() => setEditingUser(null)} className="px-5 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-medium">Cancel</button>
+                    <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-sm hover:bg-blue-700">Save Changes</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1193,7 +1495,6 @@ export default function App() {
         </div>
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
-          {/* 1. New Stats Dashboard */}
           <button 
             onClick={() => { setView('dashboard'); setServiceFilter('All'); }}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'dashboard' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
@@ -1201,15 +1502,37 @@ export default function App() {
             <LayoutDashboard size={18} /> Dashboard
           </button>
 
-          {/* 2. Moved Tickets Table */}
-          <button 
-            onClick={() => { setView('validation'); setServiceFilter('All'); }}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'validation' && serviceFilter === 'All' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-          >
-            <CheckCircle size={18} /> For Validation
-          </button>
+          {/* Validated Tasks Tab for Admins & Employees */}
+          {(currentUser.role === 'admin' || currentUser.role === 'employee') && (
+            <button 
+              onClick={() => { setView('validated_tasks'); setServiceFilter('All'); setStatusFilter('All'); }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'validated_tasks' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            >
+              <CheckSquare size={18} /> Validated Tasks
+            </button>
+          )}
 
-          {/* 3. Listings Dropdown */}
+          {/* New My Tasks Tab for Employees */}
+          {currentUser.role === 'employee' && (
+            <button 
+              onClick={() => { setView('tasks'); setServiceFilter('All'); setStatusFilter('All'); }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'tasks' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            >
+              <ClipboardList size={18} /> My Tasks
+            </button>
+          )}
+
+          {/* For Validation visible for Admins */}
+          {currentUser.role === 'admin' && (
+            <button 
+              onClick={() => { setView('validation'); setServiceFilter('All'); setStatusFilter('All'); }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'validation' && serviceFilter === 'All' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            >
+              <CheckCircle size={18} /> For Validation
+            </button>
+          )}
+
+          {/* Listings Dropdown */}
           <div>
             <button 
               onClick={() => setIsListingsOpen(!isListingsOpen)}
@@ -1239,7 +1562,7 @@ export default function App() {
                   return (
                     <button 
                       key={service}
-                      onClick={() => { setView('validation'); setServiceFilter(service); }} // Points to validation now
+                      onClick={() => { setView('validation'); setServiceFilter(service); setStatusFilter('All'); }}
                       className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${serviceFilter === service && view === 'validation' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                     >
                       {service}
@@ -1315,6 +1638,8 @@ export default function App() {
           {/* UPDATED ROUTES HERE */}
           {view === 'dashboard' && <div className="pb-12">{renderDashboardStats()}</div>}
           {view === 'validation' && <div className="pb-12">{renderValidationTable()}</div>}
+          {view === 'tasks' && <div className="pb-12">{renderEmployeeTasks()}</div>}
+          {view === 'validated_tasks' && <div className="pb-12">{renderValidatedTasks()}</div>}
           
           {view === 'ticket_detail' && <div className="pb-12">{renderTicketDetail()}</div>}
           {view === 'administration' && renderAdministration()}
@@ -1968,4 +2293,3 @@ function OtpModal({ onVerify }) {
     </div>
   );
 }
-
