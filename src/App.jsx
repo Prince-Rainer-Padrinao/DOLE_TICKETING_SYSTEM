@@ -3,7 +3,7 @@ import {
   Building2, Users, FileText, CheckCircle, XCircle, 
   Clock, ShieldAlert, PlusCircle, MessageSquare, Calendar,
   LayoutDashboard, List, FileSignature, Shield, ChevronDown, ChevronRight,
-  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2, ClipboardList, Edit, CheckSquare
+  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2, ClipboardList, Edit, CheckSquare, Table
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -19,6 +19,12 @@ const DOLE_SERVICES = [
   'SEnA', 'TUPAD', 'DILEEP', 'OSH Registration', 'General Inquiry',
   'CHSP', 'OSH', 'INSPECTION', 'LIVELIHOOD', 'GIP', 'SPES', 'RWA',
   'TRAINING', 'JOB FAIR PERMIT', 'LEES', 'TAV'
+];
+
+const TRACKER_DATA = [
+  { no: "101", refNo: "BULFO-2026-01-101", type: "Request Letter / Walk-in", subject: "Request for inspection of VERANDA BOOTO GARDEN & EVENTS PLACE regarding the reported underpayment of wages and non-remittance of mandatory benefits", dateRec: "Thursday, January 15, 2026 at 9:00:00 AM", actionReq: "Appropriate Action", sender: "CHRISTINE LOBIANO (0966 199 4327)", assigned: "R. DELA CRUZ", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "For endorsement to TSSD for request for inspection", status: "COMPLETED" },
+  { no: "102", refNo: "BULFO-2026-01-102", type: "Request Letter / Walk-in", subject: "Request for acknowledgement regarding data gathering/academic research for TUPAD Program", dateRec: "Friday, January 16, 2026 at 12:30:00 PM", actionReq: "Others", sender: "TRINA D. ANNE CASTRO", assigned: "T. DACANAY", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "", status: "COMPLETED" },
+  { no: "103", refNo: "BULFO-2026-01-103", type: "Inquiry / Email", subject: "Inquiry on the updates of the filed RFA against Universal Central Specialist regarding the reported non-payment of 13th month pay and non-issuance of COE", dateRec: "Monday, January 19, 2026 at 11:43:00 AM", actionReq: "Appropriate Action", sender: "MATTHEW GOGUE", assigned: "H. DANILI", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "", status: "COMPLETED" }
 ];
 
 // --- LOGIN SCREEN COMPONENT ---
@@ -857,6 +863,7 @@ export default function App() {
 
     const validationStatuses = ['Open', 'Rejected'];
     let displayTickets = tickets.filter(t => validationStatuses.includes(t.status));
+
     if (serviceFilter !== 'All') {
       displayTickets = displayTickets.filter(t => t.service_type === serviceFilter);
     }
@@ -1168,6 +1175,61 @@ export default function App() {
                     </tr>
                   ))
                 )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTracker = () => {
+    return (
+      <div className="max-w-[98%] mx-auto mt-6 animate-in fade-in">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 shrink-0">
+            2026 INCOMING COMMUNICATIONS TRACKER
+          </h2>
+        </div>
+
+        <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse whitespace-nowrap text-xs">
+              <thead>
+                <tr className="bg-slate-700 text-white border-b border-slate-600">
+                  <th className="p-3 font-semibold text-center border-r border-slate-600">NO.</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">REFERENCE NO.</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">DOCUMENT TYPE</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">SUBJECT</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">DATE & TIME RECEIVED</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">ACTION REQUIRED</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">NAME OF SENDER & CONTACT DETAILS</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">ASSIGNED PERSONNEL</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">DATE OF ASSIGNMENT</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">REMARKS</th>
+                  <th className="p-3 font-semibold border-r border-slate-600">ACTION TAKEN</th>
+                  <th className="p-3 font-semibold text-center">STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {TRACKER_DATA.map((row, idx) => (
+                  <tr key={idx} className="border-b hover:bg-slate-50 transition-colors">
+                    <td className="p-3 text-center border-r border-slate-200">{row.no}</td>
+                    <td className="p-3 text-blue-600 underline border-r border-slate-200">{row.refNo}</td>
+                    <td className="p-3 border-r border-slate-200">{row.type}</td>
+                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[250px] max-w-[300px]">{row.subject}</td>
+                    <td className="p-3 border-r border-slate-200">{row.dateRec}</td>
+                    <td className="p-3 border-r border-slate-200 font-bold text-blue-800">{row.actionReq}</td>
+                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">{row.sender}</td>
+                    <td className="p-3 border-r border-slate-200">{row.assigned}</td>
+                    <td className="p-3 border-r border-slate-200">{row.dateAssigned}</td>
+                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[200px] text-gray-600">{row.remarks}</td>
+                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">{row.actionTaken}</td>
+                    <td className="p-3 text-center">
+                      <span className="bg-green-100 text-green-800 px-2 py-1 rounded font-bold">{row.status}</span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1502,6 +1564,15 @@ export default function App() {
             <LayoutDashboard size={18} /> Dashboard
           </button>
 
+          {(currentUser.role === 'admin' || currentUser.role === 'employee') && (
+            <button 
+              onClick={() => { setView('tracker'); setServiceFilter('All'); setStatusFilter('All'); }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors ${view === 'tracker' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            >
+              <Table size={18} /> Tracker
+            </button>
+          )}
+
           {/* Validated Tasks Tab for Admins & Employees */}
           {(currentUser.role === 'admin' || currentUser.role === 'employee') && (
             <button 
@@ -1640,6 +1711,7 @@ export default function App() {
           {view === 'validation' && <div className="pb-12">{renderValidationTable()}</div>}
           {view === 'tasks' && <div className="pb-12">{renderEmployeeTasks()}</div>}
           {view === 'validated_tasks' && <div className="pb-12">{renderValidatedTasks()}</div>}
+          {view === 'tracker' && <div className="pb-12">{renderTracker()}</div>}
           
           {view === 'ticket_detail' && <div className="pb-12">{renderTicketDetail()}</div>}
           {view === 'administration' && renderAdministration()}
