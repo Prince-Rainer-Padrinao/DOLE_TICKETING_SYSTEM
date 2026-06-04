@@ -21,12 +21,6 @@ const DOLE_SERVICES = [
   'TRAINING', 'JOB FAIR PERMIT', 'LEES', 'TAV'
 ];
 
-const TRACKER_DATA = [
-  { no: "101", refNo: "BULFO-2026-01-101", type: "Request Letter / Walk-in", subject: "Request for inspection of VERANDA BOOTO GARDEN & EVENTS PLACE regarding the reported underpayment of wages and non-remittance of mandatory benefits", dateRec: "Thursday, January 15, 2026 at 9:00:00 AM", actionReq: "Appropriate Action", sender: "CHRISTINE LOBIANO (0966 199 4327)", assigned: "R. DELA CRUZ", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "For endorsement to TSSD for request for inspection", status: "COMPLETED" },
-  { no: "102", refNo: "BULFO-2026-01-102", type: "Request Letter / Walk-in", subject: "Request for acknowledgement regarding data gathering/academic research for TUPAD Program", dateRec: "Friday, January 16, 2026 at 12:30:00 PM", actionReq: "Others", sender: "TRINA D. ANNE CASTRO", assigned: "T. DACANAY", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "", status: "COMPLETED" },
-  { no: "103", refNo: "BULFO-2026-01-103", type: "Inquiry / Email", subject: "Inquiry on the updates of the filed RFA against Universal Central Specialist regarding the reported non-payment of 13th month pay and non-issuance of COE", dateRec: "Monday, January 19, 2026 at 11:43:00 AM", actionReq: "Appropriate Action", sender: "MATTHEW GOGUE", assigned: "H. DANILI", dateAssigned: "Tuesday, January 20, 2026", remarks: "Forwarded the assigned action/memo order to the assigned personnel via email on 21 January 2026", actionTaken: "", status: "COMPLETED" }
-];
-
 // --- LOGIN SCREEN COMPONENT ---
 const LoginScreen = ({ onLogin, onGoogleLogin }) => {
   const [loginMode, setLoginMode] = useState('client'); 
@@ -1184,6 +1178,10 @@ export default function App() {
   };
 
   const renderTracker = () => {
+    // The tracker only shows inquiries that are validated (moved past "Open" or "Rejected")
+    const validStatuses = ['Ongoing', 'Pending', 'Resolved', 'Accepted - Pending Assignment'];
+    let trackerTickets = tickets.filter(t => validStatuses.includes(t.status));
+
     return (
       <div className="max-w-[98%] mx-auto mt-6 animate-in fade-in">
         <div className="flex justify-between items-center mb-6">
@@ -1212,24 +1210,35 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {TRACKER_DATA.map((row, idx) => (
-                  <tr key={idx} className="border-b hover:bg-slate-50 transition-colors">
-                    <td className="p-3 text-center border-r border-slate-200">{row.no}</td>
-                    <td className="p-3 text-blue-600 underline border-r border-slate-200">{row.refNo}</td>
-                    <td className="p-3 border-r border-slate-200">{row.type}</td>
-                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[250px] max-w-[300px]">{row.subject}</td>
-                    <td className="p-3 border-r border-slate-200">{row.dateRec}</td>
-                    <td className="p-3 border-r border-slate-200 font-bold text-blue-800">{row.actionReq}</td>
-                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">{row.sender}</td>
-                    <td className="p-3 border-r border-slate-200">{row.assigned}</td>
-                    <td className="p-3 border-r border-slate-200">{row.dateAssigned}</td>
-                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[200px] text-gray-600">{row.remarks}</td>
-                    <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">{row.actionTaken}</td>
-                    <td className="p-3 text-center">
-                      <span className="bg-green-100 text-green-800 px-2 py-1 rounded font-bold">{row.status}</span>
-                    </td>
-                  </tr>
-                ))}
+                {trackerTickets.length === 0 ? (
+                  <tr><td colSpan="12" className="p-8 text-center text-gray-500">No validated inquiries to track yet.</td></tr>
+                ) : (
+                  trackerTickets.map((ticket, idx) => {
+                    const assignedName = ticket.assigned_to ? registeredUsers.find(u => u.id === ticket.assigned_to)?.name : 'Unassigned';
+                    const latestUpdate = ticket.updates && ticket.updates.length > 0 ? ticket.updates[ticket.updates.length - 1] : null;
+
+                    return (
+                      <tr key={ticket.id} className="border-b hover:bg-slate-50 transition-colors">
+                        <td className="p-3 text-center border-r border-slate-200">{idx + 1}</td>
+                        <td className="p-3 text-blue-600 underline border-r border-slate-200">{ticket.reference_no}</td>
+                        <td className="p-3 border-r border-slate-200">Online Inquiry</td>
+                        <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[250px] max-w-[300px]">{ticket.subject}</td>
+                        <td className="p-3 border-r border-slate-200">{new Date(ticket.created_at).toLocaleString()}</td>
+                        <td className="p-3 border-r border-slate-200 font-bold text-blue-800">{ticket.service_type}</td>
+                        <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">
+                          {ticket.client_name} <br/><span className="text-xs text-gray-500">{ticket.contact_no}</span>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">{assignedName}</td>
+                        <td className="p-3 border-r border-slate-200">{ticket.date_assigned ? new Date(ticket.date_assigned).toLocaleDateString() : '-'}</td>
+                        <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[200px] text-gray-600">{latestUpdate?.remarks || '-'}</td>
+                        <td className="p-3 border-r border-slate-200 whitespace-normal min-w-[150px]">{latestUpdate?.action_taken || '-'}</td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-1 rounded font-bold ${getStatusColor(ticket.status)}`}>{ticket.status}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
