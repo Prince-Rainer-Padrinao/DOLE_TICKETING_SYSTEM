@@ -3,7 +3,8 @@ import {
   Building2, Users, FileText, CheckCircle, XCircle, 
   Clock, ShieldAlert, PlusCircle, MessageSquare, Calendar,
   LayoutDashboard, List, FileSignature, Shield, ChevronDown, ChevronRight,
-  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2, ClipboardList, Edit, CheckSquare, Table
+  User, Check, X, ExternalLink, Mail, Key, LogOut, Trash2, ClipboardList, Edit, CheckSquare, Table,
+  Settings, Phone, Edit2
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -161,6 +162,47 @@ export default function App() {
   const [rfaFormData, setRfaFormData] = useState(INITIAL_RFA_DATA);
   const [editingUser, setEditingUser] = useState(null);
 
+  // --- CUSTOM DIALOG STATE ---
+  const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', message: '', onConfirm: null });
+
+  const customAlert = (message, onCloseCallback = null) => {
+    setDialog({ isOpen: true, type: 'alert', message, onConfirm: onCloseCallback });
+  };
+
+  const customConfirm = (message, onConfirmCallback) => {
+    setDialog({ isOpen: true, type: 'confirm', message, onConfirm: onConfirmCallback });
+  };
+
+  const closeDialog = () => setDialog({ ...dialog, isOpen: false });
+
+  // Profile Form States
+  const [profileData, setProfileData] = useState({
+    first_name: '', middle_name: '', middle_initial: '', last_name: '',
+    suffix: '', sex: '', birthdate: '', civil_status: '', mobile_no: '', position: ''
+  });
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const DEFAULT_AVATAR = "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y";
+
+  useEffect(() => {
+    if (currentUser && view === 'profile') {
+      setProfileData({
+        first_name: currentUser.first_name || '',
+        middle_name: currentUser.middle_name || '',
+        middle_initial: currentUser.middle_initial || '',
+        last_name: currentUser.last_name || '',
+        suffix: currentUser.suffix || '',
+        sex: currentUser.sex || '',
+        birthdate: currentUser.birthdate || '',
+        civil_status: currentUser.civil_status || '',
+        mobile_no: currentUser.mobile_no || '',
+        position: currentUser.position || ''
+      });
+      setAvatarUrl(currentUser.avatar_url || '');
+    }
+  }, [currentUser, view]);
+
   // Load App Data from Supabase and Handle Google Redirects
   useEffect(() => {
     const fetchDatabase = async () => {
@@ -206,8 +248,9 @@ export default function App() {
         await supabase.auth.signOut();
         localStorage.clear();
         setCurrentUser(null);
-        window.location.href = window.location.origin;
-        alert("Access Denied: This Google account is not registered as a System User.");
+        customAlert("Access Denied: This Google account is not registered as a System User.", () => {
+            window.location.href = window.location.origin;
+        });
       }
     };
 
@@ -233,7 +276,7 @@ export default function App() {
         queryParams: { prompt: 'select_account' } 
       }
     });
-    if (error) alert("Google Login Error: " + error.message);
+    if (error) customAlert("Google Login Error: " + error.message);
   };
 
   // --- MANUAL AUTHENTICATION LOGIC ---
@@ -245,7 +288,7 @@ export default function App() {
     
     const user = registeredUsers.find(
       u => u.email.toLowerCase() === lowerIdentifier || 
-           u.name.toLowerCase() === lowerIdentifier
+           u.name?.toLowerCase() === lowerIdentifier
     );
 
     if (provider === 'manual') {
@@ -261,20 +304,14 @@ export default function App() {
       }
     } 
     else if (provider === 'guest') {
-      const newUser = {
+      const fakeClientUser = {
+        id: `guest-${Date.now()}`,
         email: lowerIdentifier,
-        password: 'guest-account',
         role: 'client',
         name: `Guest (${identifier.split('_')[1].split('@')[0]})`
       };
       
-      const { data, error } = await supabase.from('dole_users').insert([newUser]).select();
-      
-      if (error) return `Database Error: ${error.message}`;
-      
-      const createdUser = data[0];
-      setRegisteredUsers([...registeredUsers, createdUser]);
-      setCurrentUser(createdUser);
+      setCurrentUser(fakeClientUser);
       setView('form');
       return null;
     }
@@ -292,14 +329,82 @@ export default function App() {
     }
   };
 
+  // --- PROFILE AVATAR UPLOAD LOGIC ---
+  const handleAvatarUpload = async (e) => {
+    try {
+      setUploading(true);
+      if (!e.target.files || e.target.files.length === 0) {
+        throw new Error('You must select an image to upload.');
+      }
+
+      const file = e.target.files[0];
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${currentUser.id}-${Math.random()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      setAvatarUrl(publicUrl);
+    } catch (error) {
+      customAlert("Upload failed: " + error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarUrl('');
+  };
+
+  // --- PROFILE SAVE LOGIC ---
+  const handleProfileChange = (e) => {
+    setProfileData({ ...profileData, [e.target.name]: e.target.value });
+  };
+
+  const handleSaveProfile = () => {
+    customConfirm("Are you sure you want to apply the changes?", async () => {
+      let updatedName = currentUser.name;
+      const constructedName = `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim();
+      if (constructedName !== '') {
+        updatedName = constructedName;
+      }
+
+      const updatePayload = {
+        ...profileData,
+        name: updatedName,
+        avatar_url: avatarUrl
+      };
+
+      const { error } = await supabase
+        .from('dole_users')
+        .update(updatePayload)
+        .eq('id', currentUser.id);
+
+      if (error) {
+        customAlert("Error saving profile: " + error.message);
+      } else {
+        setCurrentUser({ ...currentUser, ...updatePayload });
+        customAlert("Profile updated successfully!");
+      }
+    });
+  };
+
   // --- ADMIN MANAGEMENT LOGIC ---
   const handleAddUser = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     const identifier = formData.get('email').toLowerCase().trim();
     
-    if (registeredUsers.some(u => u.email === identifier || u.name.toLowerCase() === identifier)) {
-      alert("This email or username is already registered.");
+    if (registeredUsers.some(u => u.email === identifier || u.name?.toLowerCase() === identifier)) {
+      customAlert("This email or username is already registered.");
       return;
     }
 
@@ -312,25 +417,26 @@ export default function App() {
 
     const { data, error } = await supabase.from('dole_users').insert([newUser]).select();
     if (error) {
-      alert("Error adding account: " + error.message);    
+      customAlert("Error adding account: " + error.message);    
     } else {
       setRegisteredUsers([...registeredUsers, data[0]]);
       e.target.reset();
-      alert("Account successfully registered!");
+      customAlert("Account successfully registered!");
     }
   };
 
-  const handleDeleteUser = async (id, email) => {
+  const handleDeleteUser = (id, email) => {
     if (email === currentUser.email) {
-      alert("You cannot delete your own account while logged in.");
+      customAlert("You cannot delete your own account while logged in.");
       return;
     }
-    if (window.confirm(`Are you sure you want to revoke access for ${email}?`)) {
+    
+    customConfirm(`Are you sure you want to revoke access for ${email}?`, async () => {
       const { error } = await supabase.from('dole_users').delete().eq('id', id);
       if (!error) {
         setRegisteredUsers(registeredUsers.filter(u => u.id !== id));
       }
-    }
+    });
   };
 
   const handleUpdateUser = async (e) => {
@@ -346,15 +452,15 @@ export default function App() {
     const { error } = await supabase.from('dole_users').update(updatedUser).eq('id', editingUser.id);
     
     if (error) {
-      alert("Error updating account: " + error.message);
+      customAlert("Error updating account: " + error.message);
     } else {
       setRegisteredUsers(registeredUsers.map(u => u.id === editingUser.id ? { ...u, ...updatedUser } : u));
       setEditingUser(null);
-      alert("Account successfully updated!");
+      customAlert("Account successfully updated!");
     }
   };
   
-  // --- STANDARD TICKETING LOGIC ---
+  // --- TICKETING LOGIC ---
   const handleClientSubmit = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -546,6 +652,197 @@ export default function App() {
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} />;
   }
+
+  const renderProfile = () => {
+    return (
+      <div className="p-8 animate-in fade-in">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">My Profile</h1>
+            <p className="text-slate-500 text-sm">Manage your account information and preferences.</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Left Column: Profile Card */}
+          <div className="w-full lg:w-80 bg-white rounded-xl shadow-sm p-6 flex flex-col items-center h-fit border border-slate-200 shrink-0">
+            <div className="relative mb-4">
+              <img 
+                src={currentUser.avatar_url || DEFAULT_AVATAR} 
+                alt="Profile Avatar" 
+                className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md"
+              />
+              <div className="absolute bottom-1 right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
+            </div>
+            <h2 className="text-lg font-bold text-slate-800 text-center uppercase">{currentUser.name || 'Anonymous User'}</h2>
+            <p className="text-slate-400 text-sm mt-1">{currentUser.position || 'No Position Set'}</p>
+            <div className="mt-3 bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium border border-blue-100">
+              {currentUser.email}
+            </div>
+
+            <div className="w-full mt-8">
+              <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-lg text-sm font-bold transition-colors">
+                <User size={18} />
+                <span>Personal Information</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Column: Edit Form */}
+          <div className="flex-1 bg-white rounded-xl shadow-sm p-8 border border-slate-200">
+            <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Personal Information</h2>
+                <p className="text-slate-500 text-sm mt-1">Update your personal information</p>
+              </div>
+              <button 
+                onClick={handleSaveProfile}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm transition-all shadow-sm"
+              >
+                Save Changes
+              </button>
+            </div>
+
+            {/* Avatar Upload Area */}
+            <div className="mb-8 flex flex-col md:flex-row md:items-center gap-6">
+              <div className="w-32">
+                <label className="text-sm font-bold text-slate-600">Avatar</label>
+              </div>
+              <div className="flex-1 flex items-center gap-4">
+                <div className="relative inline-block w-20 h-20">
+                  <img 
+                    src={avatarUrl || DEFAULT_AVATAR} 
+                    alt="Avatar preview" 
+                    className="w-20 h-20 rounded-xl object-cover bg-slate-100 border border-slate-200"
+                  />
+                  {/* Hidden standard input field trigger */}
+                  <label className="absolute -top-2 -right-2 bg-white rounded-full p-1.5 shadow-md border border-slate-200 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer">
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleAvatarUpload} 
+                      disabled={uploading}
+                    />
+                    <Edit2 size={12} />
+                  </label>
+                  <button 
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    className="absolute -bottom-2 -right-2 bg-white rounded-full p-1.5 shadow-md border border-slate-200 text-slate-400 hover:text-rose-600 transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 font-medium max-w-[150px]">
+                  {uploading ? "Uploading file..." : "Allowed file types: png, jpg, jpeg. Click top pencil to change."}
+                </p>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Given Name</label>
+                  <input name="first_name" type="text" value={profileData.first_name} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Middle Name</label>
+                  <input name="middle_name" type="text" value={profileData.middle_name} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Middle Initial</label>
+                  <input name="middle_initial" type="text" value={profileData.middle_initial} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Surname</label>
+                  <input name="last_name" type="text" value={profileData.last_name} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Position</label>
+                  <input 
+                    name="position"
+                    type="text" 
+                    value={profileData.position}
+                    onChange={handleProfileChange}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" 
+                    placeholder="e.g. LEO - III"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Suffix</label>
+                  <select name="suffix" value={profileData.suffix} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none appearance-none font-medium">
+                    <option value="">-- Select --</option>
+                    <option value="Jr.">Jr.</option>
+                    <option value="Sr.">Sr.</option>
+                    <option value="II">II</option>
+                    <option value="III">III</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Sex</label>
+                  <select name="sex" value={profileData.sex} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none appearance-none font-medium">
+                    <option value="">-- Select --</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Birthdate</label>
+                  <div className="relative">
+                    <input name="birthdate" type="date" value={profileData.birthdate} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-slate-700" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">Civil Status</label>
+                  <select name="civil_status" value={profileData.civil_status} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none appearance-none font-medium">
+                    <option value="">-- Select --</option>
+                    <option value="Single">Single</option>
+                    <option value="Married">Married</option>
+                    <option value="Widowed">Widowed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact Information */}
+            <div className="mt-10 border-t border-slate-100 pt-8">
+              <h3 className="text-lg font-bold text-slate-800 mb-6">Contact Information</h3>
+              <div className="space-y-5 max-w-xl">
+                <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
+                  <label className="w-32 text-sm font-bold text-slate-600">Mobile No.</label>
+                  <div className="flex-1 relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                      <Phone size={16} />
+                    </div>
+                    <input name="mobile_no" type="text" value={profileData.mobile_no} onChange={handleProfileChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
+                  <label className="w-32 text-sm font-bold text-slate-600">Email Address</label>
+                  <div className="flex-1 relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                      @
+                    </div>
+                    {/* Readonly because email is central to the login account */}
+                    <input type="email" readOnly value={currentUser.email} className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-500 cursor-not-allowed outline-none transition-all" title="Email cannot be changed here." />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderRfaModule = () => {
     if (rfaStep === -1) {
@@ -889,6 +1186,7 @@ export default function App() {
               className="p-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500"
             >
               <option value="All">All Services</option>
+              <option value="SEnA">SEnA</option>
               {DOLE_SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
 
@@ -1178,7 +1476,6 @@ export default function App() {
   };
 
   const renderTracker = () => {
-    // The tracker only shows inquiries that are validated (moved past "Open" or "Rejected")
     const validStatuses = ['Ongoing', 'Pending', 'Resolved', 'Accepted - Pending Assignment'];
     let trackerTickets = tickets.filter(t => validStatuses.includes(t.status));
 
@@ -1661,22 +1958,29 @@ export default function App() {
           </button>
         </nav>
 
-        {currentUser.role === 'admin' && (
-          <div className="p-3 border-t border-slate-700 mt-auto">
+        {/* BOTTOM SIDEBAR ACTIONS */}
+        <div className="p-3 border-t border-slate-700 mt-auto flex flex-col gap-1">
+          {currentUser.role === 'admin' && (
             <button 
               onClick={() => setView('administration')}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors text-sm ${view === 'administration' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
             >
               <Shield size={18} /> Administration
             </button>
-          </div>
-        )}
+          )}
+          <button 
+            onClick={() => setView('profile')}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded transition-colors text-sm ${view === 'profile' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Settings size={18} /> Account Profile
+          </button>
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-100 font-sans">
+    <div className="flex min-h-screen bg-slate-100 font-sans relative">
       {renderSidebar()}
       
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -1726,10 +2030,45 @@ export default function App() {
           {view === 'administration' && renderAdministration()}
           {view === 'rfa' && renderRfaModule()}
           {view === 'lees_portal' && renderLeesModule()}
+          
+          {/* NEW PROFILE ROUTE */}
+          {view === 'profile' && renderProfile()}
         </main>
       </div>
+
+      {/* --- CUSTOM ANIMATED DIALOG OVERLAY --- */}
+      {dialog.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-black text-slate-800 mb-2">
+              {dialog.type === 'confirm' ? 'Please Confirm' : 'Notification'}
+            </h3>
+            <p className="text-slate-600 mb-6 font-medium">{dialog.message}</p>
+            <div className="flex justify-end gap-3">
+              {dialog.type === 'confirm' && (
+                <button 
+                  onClick={closeDialog}
+                  className="px-5 py-2.5 text-slate-500 hover:bg-slate-100 rounded-xl font-bold transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button 
+                onClick={() => {
+                  if (dialog.onConfirm) dialog.onConfirm();
+                  closeDialog();
+                }}
+                className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                {dialog.type === 'confirm' ? 'Yes, I am sure' : 'Okay'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+  
 }
 
 // --- RFA SUB-COMPONENTS ---
